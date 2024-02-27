@@ -6,6 +6,8 @@ from tensorflow.keras import layers, models
 from tensorflow.keras.callbacks import ModelCheckpoint
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report
+import time
+start_time = time.time()
 
 dataset_path = 'FaceDisguiseDatabase/FaceAll'
 
@@ -48,7 +50,6 @@ label_encoder = LabelEncoder()
 encoded_labels = label_encoder.fit_transform(labels)
 one_hot_labels = to_categorical(encoded_labels)
 
-# Use the entire dataset for both training and validation
 model = models.Sequential([
     layers.Conv2D(32, (3, 3), activation='relu', input_shape=(64, 64, 3)),
     layers.MaxPooling2D((2, 2)),
@@ -84,3 +85,7 @@ if os.path.exists(checkpoint_path):
     print(report)
 else:
     print("Best model checkpoint not found.")
+
+end_time = time.time()
+total_time = end_time - start_time
+print("Total time taken:", total_time)
