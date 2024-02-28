@@ -6,9 +6,7 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras import layers, models
 from tensorflow.keras.callbacks import ModelCheckpoint
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report
-import sagemaker
-from sagemaker.tensorflow import TensorFlow
+from sklearn.metrics import accuracy_score, confusion_matrix
 import argparse
 import time
 
@@ -30,7 +28,7 @@ def build_and_compile_model(input_shape, num_classes):
     return model
 
 def main():
-    start_time = time.time()
+    start_training_time = time.time()
 
     # Load dataset from the input directory
     input_data_path = os.environ.get('SM_CHANNEL_TRAINING', 'distributedmachinelearning/FaceAll/')
@@ -65,39 +63,54 @@ def main():
                 image_count += 1
             except Exception as e:
                 print(f"Error loading {image_path}: {e}")
+                image_count += 1
 
     data = np.array(data, dtype="float32") / 255.0
     labels = np.array(labels)
     label_encoder = LabelEncoder()
     encoded_labels = label_encoder.fit_transform(labels)
+    num_classes = len(label_encoder.classes_)
     one_hot_labels = to_categorical(encoded_labels)
 
-    model = build_and_compile_model((64, 64, 3), len(np.unique(encoded_labels)))
+    model = build_and_compile_model((64, 64, 3), num_classes)
 
     checkpoint_path = os.path.join(args.model_output_dir, "best_model.h5")
     checkpoint = ModelCheckpoint(checkpoint_path, monitor='val_accuracy', verbose=1, save_best_only=True, mode='max')
     history = model.fit(data, one_hot_labels, epochs=args.epochs, validation_split=0.1, callbacks=[checkpoint])
 
+    training_time = time.time() - start_training_time
+    print("Training time:", training_time)
+
+    start_eval_time = time.time()
+
     final_model_path = os.path.join(args.model_output_dir, "final_model.h5")
     model.save(final_model_path)
-    if os.path.exists(checkpoint_path):
-        best_model = models.load_model(checkpoint_path)
-        best_loss, best_acc = best_model.evaluate(data, one_hot_labels, verbose=2)
-        print(f'Best model accuracy: {best_acc}')
-        predictions = best_model.predict(data)
-        predicted_classes = np.argmax(predictions, axis=1)
-        true_classes = np.argmax(one_hot_labels, axis=1)
-        unique_labels = np.unique(np.concatenate((predicted_classes, true_classes)))
-        target_names = label_encoder.inverse_transform(unique_labels)
 
-        report = classification_report(true_classes, predicted_classes, labels=unique_labels, target_names=target_names)
-        print(report)
-    else:
-        print("Best model checkpoint not found.")
+    best_model = models.load_model(checkpoint_path)
+    predictions = best_model.predict(data)
+    predicted_classes = np.argmax(predictions, axis=1)
+    true_classes = np.argmax(one_hot_labels, axis=1)
 
-    end_time = time.time()
-    total_time = end_time - start_time
-    print("Total training time:", total_time)
+    accuracy = accuracy_score(true_classes, predicted_classes)
+    print(f'Accuracy: {accuracy}')
+
+    confusion = confusion_matrix(true_classes, predicted_classes)
+    print('Confusion Matrix:') 
+    print(confusion)
+
+    # Compute TP, FP, TN, FN from confusion matrix
+    TP = np.diag(confusion)
+    FP = confusion.sum(axis=0) - TP
+    FN = confusion.sum(axis=1) - TP
+    TN = confusion.sum() - (TP + FP + FN)
+
+    print(f'True Positives: {TP}')
+    print(f'False Positives: {FP}')
+    print(f'True Negatives: {TN}')
+    print(f'False Negatives: {FN}')
+
+    evaluation_time = time.time() - start_eval_time
+    print("Evaluation time:", evaluation_time)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
