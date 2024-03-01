@@ -1,122 +1,94 @@
 import os
-import numpy as np
 import cv2
-import tensorflow as tf
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras import layers, models
-from tensorflow.keras.callbacks import ModelCheckpoint
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score, confusion_matrix
-import argparse
+import numpy as np
 import time
+from sklearn.preprocessing import LabelBinarizer
+from keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from keras.optimizers import Adam
+from PIL import Image
+from sklearn.metrics import classification_report
+from keras.models import load_model
+import argparse
 
-def build_and_compile_model(input_shape, num_classes):
-    model = models.Sequential([
-        layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(64, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(128, (3, 3), activation='relu'),
-        layers.Flatten(),
-        layers.Dense(128, activation='relu'),
-        layers.Dropout(0.5),
-        layers.Dense(num_classes, activation='softmax')
-    ])
-    model.compile(optimizer='adam',
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
-    return model
+def prepareDataset(path):
+    filePaths = []
+    y = []
+    count = 0
+    name = ''
+    for dirname, _, filenames in os.walk(path):
+        if count != 0:
+            x = dirname.split('/')[-1]
+            index = x.rindex('_name_')
+            name = x[index+6:].replace(' ','')
+        for filename in filenames:
+            full_path = os.path.join(dirname, filename)
+            if full_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                filePaths.append(full_path)
+                y.append(name)
+        count += 1
+    return filePaths, y
 
-def main():
-    start_training_time = time.time()
+def main(args):
+    hispanic_filePaths, hispanic_labels = prepareDataset(args.hispanic_path)
+    caucasian_filePaths, caucasian_labels = prepareDataset(args.caucasian_path)
 
-    # Load dataset from the input directory
-    input_data_path = os.environ.get('SM_CHANNEL_TRAINING', 'distributedmachinelearning/FaceAll/')
-    
+    filePaths = hispanic_filePaths + caucasian_filePaths
+    y_labels = hispanic_labels + caucasian_labels  
+
     data = []
     labels = []
+    # Load and preprocess the images
+    for i, filePath in enumerate(filePaths):
+        try:
+            pil_image = Image.open(filePath).convert('RGB')
+            image = np.array(pil_image)
+            image = cv2.resize(image, (args.image_size, args.image_size))
+            data.append(image)
+            labels.append(y_labels[i])
+        except (IOError, OSError) as e:
+            print(f"Warning: Could not read image from {filePath} - {e}")
 
-    image_count = 0
-    person_count = 0
-    current_label = None
-
-    for image_file in os.listdir(input_data_path):
-        if image_count >= 6:
-            image_count = 0
-            person_count += 1
-            continue
-
-        image_path = os.path.join(input_data_path, image_file)
-        if os.path.isdir(image_path):
-            continue
-
-        if os.path.isfile(image_path):
-            try:
-                image = cv2.imread(image_path)
-                image = cv2.resize(image, (64, 64))
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                data.append(image)
-                if image_count == 0:
-                    current_label = f"Person_{person_count}"
-                labels.append(current_label)
-
-                image_count += 1
-            except Exception as e:
-                print(f"Error loading {image_path}: {e}")
-                image_count += 1
-
-    data = np.array(data, dtype="float32") / 255.0
+    data = np.array(data, dtype="float") / 255.0
     labels = np.array(labels)
-    label_encoder = LabelEncoder()
-    encoded_labels = label_encoder.fit_transform(labels)
-    num_classes = len(label_encoder.classes_)
-    one_hot_labels = to_categorical(encoded_labels)
 
-    model = build_and_compile_model((64, 64, 3), num_classes)
+    lb = LabelBinarizer()
+    labels = lb.fit_transform(labels)
 
-    checkpoint_path = os.path.join(args.model_output_dir, "best_model.h5")
-    checkpoint = ModelCheckpoint(checkpoint_path, monitor='val_accuracy', verbose=1, save_best_only=True, mode='max')
-    history = model.fit(data, one_hot_labels, epochs=args.epochs, validation_split=0.1, callbacks=[checkpoint])
+    model = Sequential([
+        Conv2D(32, (3, 3), activation='relu', input_shape=(args.image_size, args.image_size, 3)),
+        MaxPooling2D(2, 2),
+        Dropout(0.25),
+        Conv2D(64, (3, 3), activation='relu'),
+        MaxPooling2D(2, 2),
+        Dropout(0.25),
+        Conv2D(128, (3, 3), activation='relu'),
+        MaxPooling2D(2, 2),
+        Dropout(0.25),
+        Flatten(),
+        Dense(1024, activation='relu'),
+        Dropout(0.5),
+        Dense(len(lb.classes_), activation='softmax')
+    ])
 
-    training_time = time.time() - start_training_time
-    print("Training time:", training_time)
+    model.compile(loss='categorical_crossentropy', optimizer=Adam(learning_rate=1e-4), metrics=['accuracy'])
 
-    start_eval_time = time.time()
+    model.fit(data, labels, epochs=args.epochs, batch_size=32)
+    model.save(os.path.join(args.model_output_dir, 'face_recognition_model.h5'))
 
-    final_model_path = os.path.join(args.model_output_dir, "final_model.h5")
-    model.save(final_model_path)
-
-    best_model = models.load_model(checkpoint_path)
-    predictions = best_model.predict(data)
+    predictions = model.predict(data)
     predicted_classes = np.argmax(predictions, axis=1)
-    true_classes = np.argmax(one_hot_labels, axis=1)
-
-    accuracy = accuracy_score(true_classes, predicted_classes)
-    print(f'Accuracy: {accuracy}')
-
-    confusion = confusion_matrix(true_classes, predicted_classes)
-    print('Confusion Matrix:') 
-    print(confusion)
-
-    # Compute TP, FP, TN, FN from confusion matrix
-    TP = np.diag(confusion)
-    FP = confusion.sum(axis=0) - TP
-    FN = confusion.sum(axis=1) - TP
-    TN = confusion.sum() - (TP + FP + FN)
-
-    print(f'True Positives: {TP}')
-    print(f'False Positives: {FP}')
-    print(f'True Negatives: {TN}')
-    print(f'False Negatives: {FN}')
-
-    evaluation_time = time.time() - start_eval_time
-    print("Evaluation time:", evaluation_time)
+    true_classes = np.argmax(labels, axis=1)
+    report = classification_report(true_classes, predicted_classes, target_names=lb.classes_)
+    print(report)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--hispanic_path', type=str, default=os.environ.get('SM_CHANNEL_TRAINING')+'/11_sets_Hispanics')
+    parser.add_argument('--caucasian_path', type=str, default=os.environ.get('SM_CHANNEL_TRAINING')+'/18_sets_Caucasians')
+    parser.add_argument('--image_size', type=int, default=64)
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--model_output_dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
+    args = parser.parse_args()
 
-    args, _ = parser.parse_known_args()
-    
-    main()
+    main(args)
