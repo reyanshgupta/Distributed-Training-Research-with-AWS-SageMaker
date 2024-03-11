@@ -1,4 +1,5 @@
-# Table of Contents
+# Facial Recognition Techniques Comparative Analysis Project
+## Table of Contents
 - [Overview](#overview)
 - [Project Structure](#project-structure)
 - [Dependencies](#dependencies)
@@ -7,7 +8,7 @@
 - [Future Work](#future-work)
 - [References](#references)
 
-# Overview
+## Overview
 
 This project is based on the research paper "Comparative Analysis of Image Recognition Techniques in Traditional and Distributed Computing Environments" by Reyansh Gupta, Khushi Kothari, Bhavya Chopra, Yuvika Singh, Hittanshu Upadhyay, and Aditya Kasar from SVKM’s NMIMS, STME Navi Mumbai. The research compares the performance of facial recognition algorithms using single instance machine learning algorithm training versus distributed training with parameter servers, implemented using AWS SageMaker. The metrics for comparison include processing time, accuracy, resource utilization, and cost savings using spot training on AWS SageMaker.
 
