@@ -42,7 +42,7 @@ The research found that while the distributed system trained faster and was more
 
 ## Future Work
 
-Future studies could explore the impact of different CNN architectures, dataset sizes, platforms, and frameworks on performance within both single-instance and distributed environments. Additionally, further hyperparameter tuning and scalability considerations in distributed systems would provide valuable insights for real-world image recognition applications.
+Future studies could explore the impact of several CNN architectures, dataset sizes, platforms, and frameworks on performance within both single-instance and distributed environments (more types of distributed stratergies and not just a parameter server). Additionally, further hyperparameter tuning and scalability considerations in distributed systems would provide valuable insights for real-world image recognition applications.
 
 ## References
 
